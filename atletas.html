@@ -221,6 +221,35 @@ td.name { font-weight:540; }
 .glegend { display:flex; flex-wrap:wrap; gap:14px; margin-top:10px; font-size:12px; color:var(--ink-2); }
 .glegend span.d { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:-1px; }
 
+/* ── category ruler: where the player sits among peers of the same level ──
+   Track spans 0–100% win rate: band = middle half of the field (IQR),
+   tick = field median, dot = this player (green above the mean, orange below). */
+.ruler { display:flex; flex-direction:column; gap:22px; }
+.rul-row { display:flex; flex-direction:column; gap:8px; }
+.rul-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.rul-cat { font-size:.9rem; font-weight:580; }
+.rul-meta { font-family:var(--mono); font-size:11.5px; color:var(--ink-muted); font-variant-numeric:tabular-nums; }
+.rul-meta b { color:var(--ink-2); font-weight:600; }
+.rul-track { position:relative; height:26px; margin-top:4px; }
+.rul-zone { position:absolute; top:0; bottom:0; background:color-mix(in srgb,var(--good) 12%,transparent);
+            border-left:1px dashed color-mix(in srgb,var(--good) 55%,transparent); border-radius:0 3px 3px 0; }
+.rul-line { position:absolute; top:12px; height:2px; background:var(--axis); border-radius:1px; }
+.rul-band { position:absolute; top:5px; height:16px;
+            background:color-mix(in srgb,var(--ink-muted) 15%,transparent); border-radius:3px; }
+.rul-median { position:absolute; top:1px; height:24px; width:2px; background:var(--ink-2);
+              border-radius:1px; transform:translateX(-50%); }
+.rul-mark { position:absolute; top:13px; width:15px; height:15px; border-radius:50%;
+            background:var(--s1); border:2px solid var(--surface); box-shadow:0 0 0 1px var(--ring);
+            transform:translate(-50%,-50%); z-index:2; }
+.rul-mark.hi { background:var(--s1); }
+.rul-mark.lo { background:var(--s2); }
+.rul-mark.up { background:var(--good); box-shadow:0 0 0 1px var(--ring),0 0 0 5px color-mix(in srgb,var(--good) 22%,transparent); }
+.rul-badge { font-family:var(--mono); font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+             padding:2px 6px; border-radius:2px; vertical-align:1px;
+             background:color-mix(in srgb,var(--good) 16%,transparent); color:var(--good); }
+.rul-scale { display:flex; justify-content:space-between; font-family:var(--mono); font-size:10px;
+             color:var(--ink-muted); }
+
 .empty { color:var(--ink-muted); font-size:.9rem; }
 .foot { margin-top:64px; padding-top:20px; border-top:1px solid var(--line);
         font-family:var(--mono); font-size:11px; line-height:1.9; color:var(--ink-muted); }
@@ -329,6 +358,16 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
 
   var NORM = P.map(fold);
 
+  /* ── per-category (gender|level) win/loss for every player, for the ruler ── */
+  var catStats = new Map();
+  for (var mcs = 0; mcs < M.length; mcs++) {
+    var mcm = M[mcs], gcs = G[mcm[0]], ccs = C[gcs[1]], ckey = ccs[0] + "|" + ccs[1];
+    var pool = catStats.get(ckey); if (!pool) catStats.set(ckey, pool = new Map());
+    var aw = mcm[5] === 1, SA = members(mcm[3]), SB = members(mcm[4]);
+    for (var pa = 0; pa < SA.length; pa++) { var ea = pool.get(SA[pa]) || { w: 0, l: 0 }; aw ? ea.w++ : ea.l++; pool.set(SA[pa], ea); }
+    for (var pb = 0; pb < SB.length; pb++) { var eb = pool.get(SB[pb]) || { w: 0, l: 0 }; aw ? eb.l++ : eb.w++; pool.set(SB[pb], eb); }
+  }
+
   /* ── career totals for every player (drives boards + opponent strength) ─ */
   var career = new Array(P.length);
   for (var i = 0; i < P.length; i++) career[i] = { w: 0, l: 0, t: 0, titles: 0 };
@@ -350,7 +389,7 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
     var idx = byPlayer.get(pi) || [];
     var pr = {
       matches: 0, wins: 0, losses: 0, tourneys: new Set(), draws: new Set(),
-      partners: new Map(), opp: new Map(), byLevel: new Map(), byGender: new Map(),
+      partners: new Map(), opp: new Map(), byLevel: new Map(), byGender: new Map(), byCat: new Map(),
       seasons: new Map(), camp: new Map(), superW: 0, superL: 0,
       firstDate: null, lastDate: null, log: []
     };
@@ -381,6 +420,10 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
       won ? el.w++ : el.l++; pr.byLevel.set(lv, el);
       var eg = pr.byGender.get(cat[0]) || { w: 0, l: 0 };
       won ? eg.w++ : eg.l++; pr.byGender.set(cat[0], eg);
+      // per gender+level, so the ruler can place this player among category peers
+      var ck = cat[0] + "|" + cat[1];
+      var ec = pr.byCat.get(ck) || { w: 0, l: 0, gender: cat[0], level: cat[1], rank: cat[2] };
+      won ? ec.w++ : ec.l++; pr.byCat.set(ck, ec);
 
       var sk = t[2] + "|" + lv;
       var es = pr.seasons.get(sk) || { season: t[2], level: lv, rank: cat[2], n: 0 };
@@ -638,6 +681,65 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
     return map;
   }
 
+  /* ── category ruler ───────────────────────────────────────────────────────
+     Where the player sits among everyone who has played the same gender+level.
+     Threshold p80 comes from the promotion study: above the 80th percentile of a
+     category, moving up "sticks" (~64% keep a winning record). */
+  var RULER_MIN = 5, RULER_PEERS = 8, UP_ZONE = 80;
+  function quantile(sorted, q) {
+    if (!sorted.length) return 0;
+    var pos = (sorted.length - 1) * q, base = Math.floor(pos), rest = pos - base;
+    return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base];
+  }
+  function categoryRuler(pi, pr) {
+    var cats = [...pr.byCat.values()].filter(function (c) { return c.w + c.l >= RULER_MIN; })
+      .sort(function (a, b) { return (b.w + b.l) - (a.w + a.l); });
+    var fx = function (x) { return (100 * x).toFixed(1); };
+    var out = [], anyUp = false;
+    cats.forEach(function (c) {
+      var poolMap = catStats.get(c.gender + "|" + c.level);
+      if (!poolMap) return;
+      var rates = [];
+      poolMap.forEach(function (v) { var t = v.w + v.l; if (t >= RULER_MIN) rates.push(v.w / t); });
+      if (rates.length < RULER_PEERS) return;
+      rates.sort(function (a, b) { return a - b; });
+      var N = rates.length, mine = c.w / (c.w + c.l);
+      var below = 0, above = 0;
+      rates.forEach(function (r) { if (r < mine) below++; else if (r > mine) above++; });
+      var rank = above + 1, percentile = Math.round(100 * below / N);
+      var q1 = quantile(rates, .25), med = quantile(rates, .5), q3 = quantile(rates, .75);
+      var lo = rates[0], hi = rates[N - 1];
+      // the p80 promotion signal was validated only on the gender ladders (Mista excluded)
+      var studied = c.gender === "Masculino" || c.gender === "Feminino";
+      var ready = studied && percentile >= UP_ZONE;
+      if (ready) anyUp = true;
+      out.push(
+        '<div class="rul-row"><div class="rul-head">' +
+          '<span class="rul-cat">' + esc(c.gender) + ' · Nível ' + esc(c.level) +
+            (ready ? ' <span class="rul-badge">pronto p/ subir</span>' : '') + '</span>' +
+          '<span class="rul-meta">aprov. <b>' + pct(c.w, c.w + c.l) + '</b> · percentil <b>' +
+            percentile + '</b> · ' + rank + 'º de ' + N + '</span></div>' +
+        '<div class="rul-track">' +
+          (studied ? '<div class="rul-zone" style="left:' + fx(quantile(rates, UP_ZONE / 100)) +
+            '%;right:0" title="zona de subida (≥ p' + UP_ZONE + ')"></div>' : '') +
+          '<div class="rul-line" style="left:' + fx(lo) + '%;width:' + fx(hi - lo) + '%"></div>' +
+          '<div class="rul-band" style="left:' + fx(q1) + '%;width:' + fx(q3 - q1) + '%"></div>' +
+          '<div class="rul-median" style="left:' + fx(med) + '%" title="mediana da categoria"></div>' +
+          '<div class="rul-mark ' + (ready ? 'up' : mine >= med ? 'hi' : 'lo') +
+            '" style="left:' + fx(mine) + '%" title="' + esc(P[pi]) + ' · ' + pct(c.w, c.w + c.l) + '"></div>' +
+        '</div><div class="rul-scale"><span>0%</span><span>50%</span><span>100%</span></div></div>');
+    });
+    if (!out.length)
+      return '<p class="empty">Ainda sem jogos suficientes (mínimo de ' + RULER_MIN +
+             ' por categoria) para posicionar entre os pares.</p>';
+    var legend = '<div class="wl-legend" style="margin-bottom:16px;flex-wrap:wrap">' +
+      '<span><span class="d" style="background:color-mix(in srgb,var(--ink-muted) 15%,transparent)"></span>metade central da categoria</span>' +
+      '<span><span class="d" style="background:var(--ink-2)"></span>mediana</span>' +
+      '<span><span class="d" style="background:color-mix(in srgb,var(--good) 22%,transparent)"></span>zona de subida (≥ p80)</span>' +
+      '<span><span class="d" style="background:var(--s1)"></span>este atleta</span></div>';
+    return legend + '<div class="ruler">' + out.join("") + '</div>';
+  }
+
   /* ── profile page ─────────────────────────────────────────────────────── */
   function show(pi) {
     var pr = build(pi);
@@ -710,6 +812,9 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
       stat("Finais", n(finalsReached), titles + " vencidas") +
       "</div>" +
 
+      sec("Onde está na categoria",
+          "aproveitamento frente aos atletas do mesmo nível · zona de subida ≥ percentil 80",
+          categoryRuler(pi, pr)) +
       sec("Rede de parcerias", "clique em um nó para abrir o perfil", '<div id="gwrap"></div>') +
       sec("Evolução por temporada", "faixa = nível disputado, largura = volume de jogos", timeline(pr)) +
       sec("Campanhas", "de " + pr.camp.size + (pr.camp.size > 1 ? " chaves disputadas" : " chave disputada"), funnel(pr)) +
