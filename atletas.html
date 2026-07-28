@@ -700,9 +700,10 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
      Threshold p80 comes from the promotion study: above the 80th percentile of a
      category, moving up "sticks" (~64% keep a winning record). */
   var RULER_MIN = 5, RULER_PEERS = 8;
-  // Comfort-zone cutoff to move UP from each level, from the per-transition study.
+  // Comfort-zone cutoff to move UP from each level, from the per-transition study
+  // (marginal view: success jumps only at the top 20% — p80 — of the origin category).
   // D and A have no reliable "safe" percentile, so no zone is drawn; B is fragile (n small).
-  var UP_CUT = { C: { p: 70 }, B: { p: 80, fragile: true } };
+  var UP_CUT = { C: { p: 80 }, B: { p: 80, fragile: true } };
   var NEXT_LEVEL = { E: "D", D: "C", C: "B", B: "A", A: "PRO" };
   function quantile(sorted, q) {
     if (!sorted.length) return 0;
