@@ -376,6 +376,25 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
     for (var pb = 0; pb < SB.length; pb++) { var eb = pool.get(SB[pb]) || { w: 0, l: 0 }; aw ? eb.l++ : eb.w++; pool.set(SB[pb], eb); }
   }
 
+  /* ── recent window: the current ruler compares a player against the CURRENT field
+     of the category (last RECENT_N tournaments), because player cohorts turn over
+     across 12 years. The all-time catStats above is kept for historical transitions. ── */
+  var RECENT_N = 15, RECENT_MIN = 4;
+  var recentTids = new Set(
+    T.map(function (t, i) { return [i, t[3] || ""]; })
+     .sort(function (a, b) { return b[1].localeCompare(a[1]); })
+     .slice(0, RECENT_N).map(function (x) { return x[0]; }));
+  var catStatsRecent = new Map();
+  for (var mrs = 0; mrs < M.length; mrs++) {
+    var rmm = M[mrs], rg = G[rmm[0]];
+    if (!recentTids.has(rg[0])) continue;
+    var rc = C[rg[1]], rkey = rc[0] + "|" + rc[1];
+    var rpool = catStatsRecent.get(rkey); if (!rpool) catStatsRecent.set(rkey, rpool = new Map());
+    var raw = rmm[5] === 1, RA = members(rmm[3]), RB = members(rmm[4]);
+    for (var ia = 0; ia < RA.length; ia++) { var xa = rpool.get(RA[ia]) || { w: 0, l: 0 }; raw ? xa.w++ : xa.l++; rpool.set(RA[ia], xa); }
+    for (var ib = 0; ib < RB.length; ib++) { var xb = rpool.get(RB[ib]) || { w: 0, l: 0 }; raw ? xb.l++ : xb.w++; rpool.set(RB[ib], xb); }
+  }
+
   /* ── career totals for every player (drives boards + opponent strength) ─ */
   var career = new Array(P.length);
   for (var i = 0; i < P.length; i++) career[i] = { w: 0, l: 0, t: 0, titles: 0 };
@@ -724,6 +743,32 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
     var below = 0; for (var i = 0; i < rates.length; i++) if (rates[i] < val) below++;
     return Math.round(100 * below / rates.length);
   }
+  // current field: win rates of everyone who played this category in the recent window
+  function catRatesRecent(gender, level) {
+    var poolMap = catStatsRecent.get(gender + "|" + level);
+    if (!poolMap) return null;
+    var rates = [];
+    poolMap.forEach(function (v) { var t = v.w + v.l; if (t >= RECENT_MIN) rates.push(v.w / t); });
+    if (rates.length < RULER_PEERS) return null;
+    rates.sort(function (a, b) { return a - b; });
+    return rates;
+  }
+  // this player's own record per category, restricted to the recent window
+  function playerRecentByCat(pi) {
+    var idx = byPlayer.get(pi) || [], map = new Map();
+    idx.forEach(function (mi) {
+      var m = M[mi], g = G[m[0]];
+      if (!recentTids.has(g[0])) return;
+      var cat = C[g[1]];
+      if (cat[0] !== "Masculino" && cat[0] !== "Feminino") return;
+      var mine = members(m[3]).indexOf(pi) >= 0, won = (m[5] === 1) === mine;
+      var key = cat[0] + "|" + cat[1];
+      var e = map.get(key);
+      if (!e) { e = { gender: cat[0], level: cat[1], w: 0, l: 0 }; map.set(key, e); }
+      won ? e.w++ : e.l++;
+    });
+    return map;
+  }
   // one ruler track: field range, IQR band, median, optional up-zone, athlete marker
   function rulerTrack(rates, mine, cut) {
     var q1 = quantile(rates, .25), med = quantile(rates, .5), q3 = quantile(rates, .75);
@@ -740,12 +785,13 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
       '</div><div class="rul-scale"><span>0%</span><span>50%</span><span>100%</span></div>';
   }
   function categoryRuler(pi, pr) {
-    var cats = [...pr.byCat.values()].filter(function (c) {
-      return (c.gender === "Masculino" || c.gender === "Feminino") && c.w + c.l >= RULER_MIN;
-    }).sort(function (a, b) { return (b.w + b.l) - (a.w + a.l); });
+    // recent field + this player's recent record, so the ruler reflects TODAY's cohort
+    var cats = [...playerRecentByCat(pi).values()]
+      .filter(function (c) { return c.w + c.l >= RECENT_MIN; })
+      .sort(function (a, b) { return (b.w + b.l) - (a.w + a.l); });
     var out = [];
     cats.forEach(function (c) {
-      var rates = catRates(c.gender, c.level);
+      var rates = catRatesRecent(c.gender, c.level);
       if (!rates) return;
       var N = rates.length, mine = c.w / (c.w + c.l), pctl = pctOf(rates, mine);
       var above = 0; rates.forEach(function (r) { if (r > mine) above++; });
@@ -765,8 +811,7 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
         '</div>');
     });
     if (!out.length)
-      return '<p class="empty">Ainda sem jogos suficientes (mínimo de ' + RULER_MIN +
-             ' por categoria) para posicionar entre os pares.</p>';
+      return '<p class="empty">Sem jogos recentes suficientes para posicionar entre os atletas atuais da categoria.</p>';
     var legend = '<div class="wl-legend" style="margin-bottom:16px;flex-wrap:wrap">' +
       '<span><span class="d" style="background:color-mix(in srgb,var(--ink-muted) 15%,transparent)"></span>metade central da categoria</span>' +
       '<span><span class="d" style="background:var(--ink-2)"></span>mediana</span>' +
@@ -797,17 +842,30 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
     Object.keys(byG).forEach(function (gender) {
       var sl = byG[gender].sort(function (a, b) { return (a.date || "").localeCompare(b.date || "") || b.rank - a.rank; });
       if (sl.length < 2) return;
-      var rb = sl[0].rank;
+      var est = sl[0].rank;   // established (home) level so far
       for (var i = 1; i < sl.length; i++) {
-        if (sl[i].rank < rb) {
-          var fromRank = rb, toRank = sl[i].rank;
-          var pre = sl.slice(0, i).filter(function (s) { return s.rank === fromRank; });
-          var post = sl.slice(i).filter(function (s) { return s.rank === toRank; });
-          var pw = 0, pn = 0; pre.forEach(function (s) { pw += s.w; pn += s.w + s.l; });
-          var ow = 0, on = 0; post.forEach(function (s) { ow += s.w; on += s.w + s.l; });
-          out.push({ gender: gender, fromLevel: pre.length ? pre[pre.length - 1].level : null,
-                     toLevel: sl[i].level, tid: sl[i].tid, date: sl[i].date, pw: pw, pn: pn, ow: ow, on: on });
-          rb = toRank;
+        if (sl[i].rank < est) {
+          var fromRank = est, toRank = sl[i].rank;
+          // A move only COUNTS if it stuck: the very next tournament is also at the
+          // new level (or stronger) AND, from here on, the player plays the new level
+          // more than they return to the old one. A one-off "guest" appearance in a
+          // higher category (allowed, then back down) is skipped.
+          var hasNextUp = (i + 1 < sl.length) && (sl[i + 1].rank <= toRank);
+          var up = 0, back = 0;
+          for (var j = i; j < sl.length; j++) {
+            if (sl[j].rank <= toRank) up++;
+            else if (sl[j].rank === fromRank) back++;
+          }
+          if (hasNextUp && up > back) {
+            var pre = sl.slice(0, i).filter(function (s) { return s.rank === fromRank; });
+            var post = sl.slice(i).filter(function (s) { return s.rank === toRank; });
+            var pw = 0, pn = 0; pre.forEach(function (s) { pw += s.w; pn += s.w + s.l; });
+            var ow = 0, on = 0; post.forEach(function (s) { ow += s.w; on += s.w + s.l; });
+            out.push({ gender: gender, fromLevel: pre.length ? pre[pre.length - 1].level : null,
+                       toLevel: sl[i].level, tid: sl[i].tid, date: sl[i].date, pw: pw, pn: pn, ow: ow, on: on });
+            est = toRank;   // only now is the higher level the player's home
+          }
+          // else: guest appearance — keep scanning without changing the home level
         }
       }
     });
@@ -913,7 +971,7 @@ button.link:focus-visible, .res:focus-visible { outline:2px solid var(--s1); out
       "</div>" +
 
       sec("Onde está na categoria",
-          "aproveitamento frente aos atletas do mesmo nível · zona de subida por transição",
+          "seu aproveitamento vs. quem joga sua categoria hoje (últimos 15 torneios) · zona de subida por transição",
           categoryRuler(pi, pr)) +
       (trSec ? sec("Transições de categoria",
           "onde você estava na régua da categoria quando subiu, e o que veio depois",
